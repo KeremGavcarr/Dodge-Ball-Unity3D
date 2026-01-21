@@ -3,8 +3,9 @@ using UnityEngine;
 public class PlayerController : MonoBehaviour
 {
     [Header("Hareket Ayarları")]
-    public float moveSpeed = 5f;
-    public float rotationSpeed = 720f;
+    public float walkSpeed = 5f;
+    public float runSpeed = 7f;
+    public float rotationSpeed = 10f; 
     public float jumpHeight = 3f;
     public float gravity = -35f;
 
@@ -16,8 +17,9 @@ public class PlayerController : MonoBehaviour
 
     private Vector3 velocity;
     private bool isGrounded;
-    private float groundCheckDelay = 0.2f; // Zıplama sonrası kısa bir süre yer kontrolünü yoksay
-    private float lastGroundedTime; // En son ne zaman yerdaydik?
+    private float lastGroundedTime; 
+    private float jumpCooldown = 0.2f; // Zıplama animasyonunun başlaması için süre
+    private float lastJumpTime;
 
     void Start()
     {
@@ -29,57 +31,79 @@ public class PlayerController : MonoBehaviour
     void Update()
     {
         // 1. GELİŞMİŞ YER KONTROLÜ
-        if (controller.isGrounded)
+        bool isTouchingGround = controller.isGrounded;
+
+        // Eğer yeni zıpladıysak, yer kontrolünü kısa süre geçersiz say
+        if (Time.time - lastJumpTime < jumpCooldown)
+        {
+            isTouchingGround = false;
+        }
+
+        if (isTouchingGround)
         {
             lastGroundedTime = Time.time;
             isGrounded = true;
         }
         else
         {
-            // Eğer 0.1 saniye içinde hala yerdeysek zıplamaya izin ver (Tolerans)
             isGrounded = (Time.time - lastGroundedTime < 0.1f);
         }
 
-        if (controller.isGrounded && velocity.y < 0)
+        if (isTouchingGround && velocity.y < 0)
         {
             velocity.y = -2f; 
         }
 
         // 2. GİRDİLER
-        float h = Input.GetAxisRaw("Horizontal");
-        float v = Input.GetAxisRaw("Vertical");
-        Vector3 inputDir = new Vector3(h, 0, v).normalized;
+        float h = Input.GetAxis("Horizontal");
+        float v = Input.GetAxis("Vertical");
+        bool isMoving = (Mathf.Abs(h) > 0.1f || Mathf.Abs(v) > 0.1f);
+        bool isRunning = Input.GetKey(KeyCode.LeftShift) && isMoving; 
+        float currentSpeed = isRunning ? runSpeed : walkSpeed;
 
-        // 3. ZIPLAMA (Anında Tepki)
+        // 3. BAKIŞ YÖNÜ
+        float cameraYRotation = mainCamera.transform.eulerAngles.y;
+        Quaternion targetRot = Quaternion.Euler(0, cameraYRotation, 0);
+        transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, Time.deltaTime * rotationSpeed);
+
+        // 4. HAREKET
+        Vector3 moveDir = transform.forward * v + transform.right * h;
+        controller.Move(moveDir.normalized * currentSpeed * Time.deltaTime);
+
+        // 5. ZIPLAMA VE YERÇEKİMİ
         if (Input.GetKeyDown(KeyCode.Space) && isGrounded)
         {
             velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
             animator.SetBool("IsJump", true);
-            lastGroundedTime = 0; // Zıpladığı an yer kontrolünü sıfırla
+            lastJumpTime = Time.time; // Zıplama zamanını kaydet
+            lastGroundedTime = 0;
         }
-        else if (controller.isGrounded)
+        
+        // Sadece zıplama üzerinden belli bir süre geçtikten sonra yere inişi kontrol et
+        if (isTouchingGround && Time.time - lastJumpTime > jumpCooldown)
         {
             animator.SetBool("IsJump", false);
         }
 
-        // 4. HAREKET VE DÖNÜŞ
-        if (inputDir.magnitude >= 0.1f)
-        {
-            float targetAngle = Mathf.Atan2(inputDir.x, inputDir.z) * Mathf.Rad2Deg + mainCamera.transform.eulerAngles.y;
-            Quaternion targetRotation = Quaternion.Euler(0, targetAngle, 0);
-            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, rotationSpeed * Time.deltaTime);
-
-            Vector3 moveDir = targetRotation * Vector3.forward;
-            controller.Move(moveDir * moveSpeed * Time.deltaTime);
-        }
-
-        // 5. YERÇEKİMİ
         velocity.y += gravity * Time.deltaTime;
         controller.Move(velocity * Time.deltaTime);
 
-        // 6. GÖRSEL VE KAMERA
-        animator.SetFloat("Vert", inputDir.magnitude, 0.1f, Time.deltaTime);
+        // 6. ANIMASYON KONTROLÜ
+        float stateValue = isRunning ? 1f : 0f;
+        animator.SetFloat("State", stateValue, 0.1f, Time.deltaTime);
 
+        if (isMoving)
+        {
+            animator.SetFloat("Vert", v, 0.1f, Time.deltaTime);
+            animator.SetFloat("Hor", h, 0.1f, Time.deltaTime);
+        }
+        else
+        {
+            animator.SetFloat("Vert", 0, 0.1f, Time.deltaTime);
+            animator.SetFloat("Hor", 0, 0.1f, Time.deltaTime);
+        }
+
+        // 7. KAMERA TAKİP NOKTASI
         if (kameraTakipNoktasi != null)
         {
             kameraTakipNoktasi.position = transform.position + Vector3.up * 1.5f;
